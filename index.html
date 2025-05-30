@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Olympics - All Games Restored</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #162447;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            width: 100%;
+            max-width: 700px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            color: #f39c12;
+            text-shadow: 3px 3px #000;
+            margin-bottom: 40px;
+        }
+        .menu-button {
+            background-color: #e94560;
+            color: #fff;
+            border: none;
+            padding: 15px 30px;
+            margin: 10px 0;
+            border-radius: 10px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            max-width: 300px;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .menu-button:hover {
+            background-color: #f06273;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 10px rgba(0,0,0,0.4);
+        }
+        .menu-button:active {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 5px rgba(0,0,0,0.3);
+        }
+        .game-placeholder {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #1f4068;
+            border-radius: 10px;
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: #a0a0a0;
+            border: 2px dashed #f39c12;
+        }
+        .game-canvas {
+            border: 2px solid #ffffff;
+            border-radius: 8px;
+            display: block;
+            margin: 20px auto 10px;
+        }
+        #pongCanvas { background-color: #000000; }
+        #foosballCanvas { background-color: #006400; }
+        #iceHockeyCanvas { background-color: #D0EFFF; } 
+        #assholePongCanvas {
+            background-color: #581c87; 
+            border: 4px solid #facc15; 
+        }
+        .score-display {
+            font-size: 1.5rem;
+            color: #ffffff; 
+            margin-bottom: 10px;
+        }
+        #iceHockeyScore { color: #111111; }
+        #assholePongScore { color: #fde047; } 
+        .controls-text {
+            font-size: 0.8rem;
+            color: #cccccc; 
+        }
+        #ice-hockey-game .controls-text { color: #333333; }
+        #asshole-pong-game .controls-text { color: #fde047; }
+
+        @media (max-width: 640px) {
+            h1 { font-size: 2rem; }
+            .menu-button { font-size: 1rem; padding: 12px 25px; }
+            .container { padding: 20px; }
+            .game-canvas { width: 90%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Video Olympics</h1>
+        <div id="main-menu">
+            <button class="menu-button" onclick="selectGameWrapper('Pong')">Pong</button>
+            <button class="menu-button" onclick="selectGameWrapper('Foosball')">Foosball</button>
+            <button class="menu-button" onclick="selectGameWrapper('Ice Hockey')">Ice Hockey</button>
+            <button class="menu-button" onclick="selectGameWrapper('Asshole Pong')">Asshole Pong</button>
+        </div>
+        <div id="game-area" class="game-placeholder">
+            Select a game to start! (Click to enable audio)
+        </div>
+    </div>
+
+    <script>
+        const gameArea = document.getElementById('game-area');
+        const mainMenu = document.getElementById('main-menu');
+        let activeGameInterval = null; 
+        let activeGameType = null; 
+
+        let gameKeys = {};
+        function gameKeyDownHandler(e) { gameKeys[e.key] = true; }
+        function gameKeyUpHandler(e) { gameKeys[e.key] = false; }
+
+        // Centralized Tone.js synths
+        const synths = {
+            pong: {},
+            hockey: {},
+            foosball: {},
+            assholePong: {}
+        };
+        async function initializeAudio() {
+            let audioContextStarted = Tone.context.state === 'running';
+            if (!audioContextStarted) {
+                try {
+                    await Tone.start();
+                    console.log("AudioContext started by user interaction.");
+                    audioContextStarted = true;
+                } catch (e) {
+                    console.error("Error starting Tone.js AudioContext:", e);
+                    const gameAreaMsg = document.getElementById('game-area');
+                    if (gameAreaMsg && gameAreaMsg.classList.contains('game-placeholder')) {
+                        gameAreaMsg.textContent = "Audio failed to start. Click a game to try again.";
+                    }
+                }
+            }
+            
+            if (audioContextStarted) {
+                // Pong Synths
+                if (!synths.pong.paddleHit) synths.pong.paddleHit = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.005, decay: 0.05, sustain: 0, release: 0.1 } }).toDestination();
+                if (!synths.pong.score) synths.pong.score = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.2 } }).toDestination();
+                if (!synths.pong.wallHit) synths.pong.wallHit = new Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 2, envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.1 } }).toDestination();
+                
+                // Ice Hockey Synths
+                if (!synths.hockey.stickHit) { synths.hockey.stickHit = new Tone.MetalSynth({ frequency: 200, envelope: { attack: 0.001, decay: 0.05, release: 0.05 }, harmonicity: 6.1, modulationIndex: 16, resonance: 2000, octaves: 0.8 }).toDestination(); synths.hockey.stickHit.volume.value = -10; }
+                if (!synths.hockey.boardHit) { synths.hockey.boardHit = new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 3, envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination(); synths.hockey.boardHit.volume.value = -8; }
+                if (!synths.hockey.score) { synths.hockey.score = new Tone.Synth({ oscillator: { type: 'triangle8' }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 0.3 } }).toDestination(); synths.hockey.score.volume.value = -6; }
+
+                // Foosball Synths
+                if (!synths.foosball.manHit) { synths.foosball.manHit = new Tone.MetalSynth({ frequency: 300, envelope: { attack: 0.001, decay: 0.02, release: 0.02 }, harmonicity: 3.1, modulationIndex: 8, resonance: 1000, octaves: 1.5 }).toDestination(); synths.foosball.manHit.volume.value = -15; }
+                if (!synths.foosball.tableWallHit) { synths.foosball.tableWallHit = new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 2.5, envelope: { attack: 0.002, decay: 0.08, sustain: 0, release: 0.1 } }).toDestination(); synths.foosball.tableWallHit.volume.value = -12;}
+                if (!synths.foosball.goalClink) { synths.foosball.goalClink = new Tone.MetalSynth({ frequency: 250, envelope: { attack: 0.002, decay: 0.05, release: 0.05 }, harmonicity: 4.0, modulationIndex: 10, resonance: 1500, octaves: 1 }).toDestination(); synths.foosball.goalClink.volume.value = -10; }
+
+                // Asshole Pong Synths
+                if (!synths.assholePong.paddle1Hit) { synths.assholePong.paddle1Hit = new Tone.Synth({ oscillator: { type: 'pulse', width: 0.6 }, envelope: { attack: 0.005, decay: 0.03, sustain: 0, release: 0.05 }, detune: 15 }).toDestination(); synths.assholePong.paddle1Hit.volume.value = -12; }
+                if (!synths.assholePong.paddle2Hit) { synths.assholePong.paddle2Hit = new Tone.Synth({ oscillator: { type: 'sawtooth' }, envelope: { attack: 0.01, decay: 0.08, sustain: 0, release: 0.1 } }).toDestination(); synths.assholePong.paddle2Hit.volume.value = -9; }
+                if (!synths.assholePong.wallHit) { synths.assholePong.wallHit = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.001, decay: 0.02, sustain: 0, release: 0.03 } }); const wallFilter = new Tone.Filter(1000, "lowpass").toDestination(); synths.assholePong.wallHit.connect(wallFilter); synths.assholePong.wallHit.volume.value = -18; }
+                if (!synths.assholePong.score) { synths.assholePong.score = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.15, sustain: 0, release: 0.1 } }).toDestination(); synths.assholePong.score.volume.value = -10; }
+                if (!synths.assholePong.glitch) { synths.assholePong.glitch = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.01, sustain: 0, release: 0.02 } }); const glitchFilter = new Tone.Filter(2000, "bandpass").toDestination(); synths.assholePong.glitch.connect(glitchFilter); synths.assholePong.glitch.volume.value = -20; }
+            } else {
+                console.warn("Tone.js context not running after attempt. Synths not initialized.");
+            }
+        }
+        
+        function selectGameWrapper(gameName) {
+            console.log(`selectGameWrapper called for: ${gameName}`);
+            selectGame(gameName).catch(err => {
+                console.error("Error in selectGameWrapper calling selectGame:", err);
+                 if (mainMenu) mainMenu.style.display = 'block';
+                if (gameArea) {
+                    gameArea.innerHTML = `<p style="color:red;">Critical Error loading ${gameName}. Check console.</p>`;
+                    gameArea.classList.add('game-placeholder');
+                }
+            });
+        }
+
+        async function selectGame(gameName) { 
+            console.log(`selectGame started for: ${gameName}`);
+            try {
+                if (activeGameInterval) {
+                    clearInterval(activeGameInterval);
+                    activeGameInterval = null;
+                    console.log("Cleared activeGameInterval");
+                }
+
+                // CRITICAL: This manual reset of global variables is error-prone and hard to maintain.
+                // Ideally, each game should have its own cleanup/reset method that is called here,
+                // or game objects should be self-contained and new instances created.
+                puck = undefined; stickP1 = undefined; stickP2 = undefined; iceHockeyCanvas = undefined; iceHockeyCtx = undefined;
+                pongBall = undefined; pongPaddle1 = undefined; pongPaddle2 = undefined; pongCanvas = undefined; pongCtx = undefined;
+                foosballBall = undefined; foosballPaddlesP1 = []; foosballPaddlesP2 = []; foosballCanvas = undefined; foosballCtx = undefined;
+                apBall = undefined; apPaddle1 = undefined; apPaddle2 = undefined; assholePongCanvas = undefined; assholePongCtx = undefined;
+                console.log("Global game object references reset (Note: This is a temporary measure. Consider encapsulating game states.)");
+
+                await initializeAudio(); 
+                console.log("initializeAudio completed");
+                
+                if (!mainMenu || !gameArea) {
+                    console.error("FATAL: mainMenu or gameArea element not found in DOM!");
+                    return;
+                }
+                
+                mainMenu.style.display = 'none'; 
+                console.log("Main menu hidden");
+                gameArea.innerHTML = '';
+                gameArea.classList.remove('game-placeholder');
+                console.log("Game area cleared");
+
+                const backButton = document.createElement('button');
+                backButton.textContent = 'Back to Menu'; backButton.className = 'menu-button'; backButton.style.backgroundColor = '#3498db'; backButton.style.marginTop = '20px'; backButton.style.marginBottom = '10px';
+                backButton.onclick = showMainMenu;
+                
+                const gameContent = document.createElement('div');
+                gameContent.id = gameName.toLowerCase().replace(/\s+/g, '-') + '-game';
+                
+                gameArea.appendChild(gameContent); 
+                gameArea.appendChild(backButton);
+                console.log("Game content area and back button appended");
+                
+                document.removeEventListener('keydown', gameKeyDownHandler); 
+                document.removeEventListener('keyup', gameKeyUpHandler);
+                console.log("Old key listeners removed");
+                
+                activeGameType = gameName; 
+                console.log(`activeGameType set to: ${activeGameType}`);
+
+                if (gameName === 'Pong') loadPong();
+                else if (gameName === 'Foosball') loadFoosball();
+                else if (gameName === 'Ice Hockey') loadIceHockey();
+                else if (gameName === 'Asshole Pong') loadAssholePong();
+                console.log(`${gameName} load function called`);
+                
+                document.addEventListener('keydown', gameKeyDownHandler); 
+                document.addEventListener('keyup', gameKeyUpHandler);
+                console.log("New key listeners added");
+                console.log(`selectGame for ${gameName} finished successfully.`);
+
+            } catch (error) {
+                console.error(`Critical error within selectGame for ${gameName}:`, error);
+                if (mainMenu) mainMenu.style.display = 'block'; 
+                if (gameArea) {
+                    gameArea.innerHTML = `<p style="color:red;">Error loading game: ${gameName}. Check console for details.</p>`;
+                    if (!gameArea.classList.contains('game-placeholder')) {
+                        gameArea.classList.add('game-placeholder');
+                    }
+                }
+            }
+        }
+
+        function showMainMenu() { 
+            console.log("showMainMenu called");
+            if (activeGameInterval) { clearInterval(activeGameInterval); activeGameInterval = null; console.log("Cleared activeGameInterval in showMainMenu");}
+            if(mainMenu) mainMenu.style.display = 'block'; 
+            if(gameArea) {
+                gameArea.innerHTML = 'Select a game to start! (Click to enable audio)'; 
+                if(!gameArea.classList.contains('game-placeholder')) gameArea.classList.add('game-placeholder');
+            }
+            document.removeEventListener('keydown', gameKeyDownHandler); document.removeEventListener('keyup', gameKeyUpHandler); 
+            activeGameType = null;
+            console.log("Main menu shown, listeners removed, activeGameType reset.");
+        }
+
+        // --- PONG GAME SOUNDS & LOGIC ---
+        function playPongPaddleHitSound() { if (synths.pong.paddleHit && Tone.context.state === 'running') synths.pong.paddleHit.triggerAttackRelease("C4", "0.05"); }
+        function playPongScoreSound() { if (synths.pong.score && Tone.context.state === 'running') { synths.pong.score.triggerAttackRelease("A5", "0.15", Tone.now()); synths.pong.score.triggerAttackRelease("E5", "0.1", Tone.now() + 0.07); }}
+        function playPongWallHitSound() { if (synths.pong.wallHit && Tone.context.state === 'running') synths.pong.wallHit.triggerAttackRelease("G2", "0.02");}
+        
+        let pongCanvas, pongCtx, pongBall, pongPaddle1, pongPaddle2, pongScore1 = 0, pongScore2 = 0;
+        const PONG_PADDLE_HEIGHT = 80, PONG_PADDLE_WIDTH = 10, PONG_BALL_RADIUS = 7, PONG_PADDLE_SPEED = 6, PONG_WIN_SCORE = 5;
+        
+        function loadPong() { 
+            console.log("loadPong called");
+            const gameContainer = document.getElementById('pong-game'); 
+            if (!gameContainer) { console.error("Pong container 'pong-game' not found!"); return; }
+            gameContainer.innerHTML = `
+                <div class="score-display" id="pongScore">P1:0-P2:0</div>
+                <div id="pongMessages" class="game-messages"></div>
+                <canvas id="pongCanvas" class="game-canvas"></canvas>
+                <p class="controls-text">P1:W/S|P2:Up/Down</p>`;
+            const C = gameContainer; // Keep C for brevity if preferred in existing logic
+            if (!C) { console.error("Pong container 'pong-game' not found!"); return; }
+            C.innerHTML = `<div class="score-display" id="pongScore">P1:0-P2:0</div><canvas id="pongCanvas" class="game-canvas"></canvas><p class="controls-text">P1:W/S|P2:Up/Down</p>`;
+            pongCanvas = document.getElementById('pongCanvas'); 
+            if (!pongCanvas) { console.error("Pong canvas 'pongCanvas' not found!"); return; }
+            const cW = C.offsetWidth > 0 ? C.offsetWidth : 600; pongCanvas.width = Math.min(cW - 40, 560); pongCanvas.height = pongCanvas.width * 0.6; 
+            pongCtx = pongCanvas.getContext('2d'); 
+            if (!pongCtx) { console.error("Failed to get 2D context for Pong canvas!"); return; }
+            initPongGame();
+        }
+        function initPongGame(){ 
+            console.log("initPongGame called");
+            pongScore1=0; pongScore2=0; updatePongScoreDisplay();
+            const messagesContainer = document.getElementById('pongMessages');
+            if (messagesContainer) messagesContainer.innerHTML = ''; // Clear previous win messages/buttons
+            if (!pongCanvas) { console.error("initPongGame: pongCanvas is not defined!"); return; }
+            pongPaddle1 = { x: 10, y: pongCanvas.height / 2 - PONG_PADDLE_HEIGHT / 2, width: PONG_PADDLE_WIDTH, height: PONG_PADDLE_HEIGHT };
+            pongPaddle2 = { x: pongCanvas.width - PONG_PADDLE_WIDTH - 10, y: pongCanvas.height / 2 - PONG_PADDLE_HEIGHT / 2, width: PONG_PADDLE_WIDTH, height: PONG_PADDLE_HEIGHT };
+            resetPongBall(); 
+            if (activeGameInterval) clearInterval(activeGameInterval); 
+            activeGameInterval = setInterval(updatePong, 1000 / 60); 
+            console.log("Pong initialized and interval set.");
+        }
+        function resetPongBall(){ 
+            if (!pongCanvas) { console.error("resetPongBall: pongCanvas is not defined!"); return; }
+            pongBall = { x: pongCanvas.width / 2, y: pongCanvas.height / 2, radius: PONG_BALL_RADIUS, dx: (Math.random() > 0.5 ? 3.5 : -3.5), dy: (Math.random() - 0.5) * 5 }; 
+            if (Math.abs(pongBall.dy) < 0.5) pongBall.dy = Math.random() > 0.5 ? 1 : -1; 
+        }
+        function updatePongScoreDisplay(){ const el=document.getElementById('pongScore'); if(el) el.textContent = `P1: ${pongScore1} - P2: ${pongScore2}`; }
+        function drawPong(){ 
+            if (!pongCtx || !pongCanvas) return; 
+            pongCtx.fillStyle = '#000'; pongCtx.fillRect(0,0,pongCanvas.width,pongCanvas.height); pongCtx.fillStyle = '#fff';
+            if(pongPaddle1) pongCtx.fillRect(pongPaddle1.x, pongPaddle1.y, pongPaddle1.width, pongPaddle1.height); 
+            if(pongPaddle2) pongCtx.fillRect(pongPaddle2.x, pongPaddle2.y, pongPaddle2.width, pongPaddle2.height);
+            if(pongBall) { pongCtx.beginPath(); pongCtx.arc(pongBall.x, pongBall.y, pongBall.radius, 0, Math.PI * 2); pongCtx.fill(); }
+            pongCtx.strokeStyle = '#555'; pongCtx.lineWidth = 2; pongCtx.beginPath(); pongCtx.moveTo(pongCanvas.width/2,0); pongCtx.lineTo(pongCanvas.width/2,pongCanvas.height); pongCtx.stroke();
+        }
+        function handlePongInput(){ 
+            if (!pongPaddle1 || !pongPaddle2 || !pongCanvas) return;
+            if (gameKeys['w'] || gameKeys['W']) pongPaddle1.y -= PONG_PADDLE_SPEED; if (gameKeys['s'] || gameKeys['S']) pongPaddle1.y += PONG_PADDLE_SPEED;
+            if (gameKeys['ArrowUp']) pongPaddle2.y -= PONG_PADDLE_SPEED; if (gameKeys['ArrowDown']) pongPaddle2.y += PONG_PADDLE_SPEED;
+            pongPaddle1.y = Math.max(0, Math.min(pongCanvas.height - pongPaddle1.height, pongPaddle1.y));
+            pongPaddle2.y = Math.max(0, Math.min(pongCanvas.height - pongPaddle2.height, pongPaddle2.y));
+        }
+        function updatePong() { 
+            if (activeGameType !== 'Pong' || !pongBall || !pongPaddle1 || !pongPaddle2 || !pongCanvas) return; 
+            handlePongInput();
+            pongBall.x += pongBall.dx; pongBall.y += pongBall.dy;
+            if (pongBall.y + pongBall.radius > pongCanvas.height || pongBall.y - pongBall.radius < 0) { pongBall.dy *= -1; playPongWallHitSound(); }
+            if (pongBall.dx < 0 && pongBall.x - pongBall.radius < pongPaddle1.x + pongPaddle1.width && pongBall.x - pongBall.radius > pongPaddle1.x && pongBall.y + pongBall.radius > pongPaddle1.y && pongBall.y - pongBall.radius < pongPaddle1.y + pongPaddle1.height) { pongBall.dx *= -1; let dY = pongBall.y - (pongPaddle1.y + pongPaddle1.height / 2); pongBall.dy = dY * 0.25; playPongPaddleHitSound(); pongBall.x = pongPaddle1.x + pongPaddle1.width + pongBall.radius;}
+            if (pongBall.dx > 0 && pongBall.x + pongBall.radius > pongPaddle2.x && pongBall.x + pongBall.radius < pongPaddle2.x + pongPaddle2.width && pongBall.y + pongBall.radius > pongPaddle2.y && pongBall.y - pongBall.radius < pongPaddle2.y + pongPaddle2.height) { pongBall.dx *= -1; let dY = pongBall.y - (pongPaddle2.y + pongPaddle2.height / 2); pongBall.dy = dY * 0.25; playPongPaddleHitSound(); pongBall.x = pongPaddle2.x - pongBall.radius;}
+            if (pongBall.x + pongBall.radius < 0) { pongScore2++; updatePongScoreDisplay(); resetPongBall(); playPongScoreSound(); } 
+            else if (pongBall.x - pongBall.radius > pongCanvas.width) { pongScore1++; updatePongScoreDisplay(); resetPongBall(); playPongScoreSound(); }
+            
+            if (pongScore1 >= PONG_WIN_SCORE || pongScore2 >= PONG_WIN_SCORE) { 
+                clearInterval(activeGameInterval); 
+                activeGameInterval = null; 
+                const winner = pongScore1 > pongScore2 ? "Player 1" : "Player 2";
+                const messagesContainer = document.getElementById('pongMessages');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `<h3 class="text-2xl mt-4">${winner} Wins! Final: ${pongScore1}-${pongScore2}</h3>`;
+                    const playAgainButton = document.createElement('button');
+                    playAgainButton.textContent = 'Play Pong Again';
+                    playAgainButton.className = 'menu-button';
+                    playAgainButton.style.backgroundColor = '#2ecc71';
+                    playAgainButton.onclick = initPongGame; // initPongGame will clear messages
+                    messagesContainer.appendChild(playAgainButton);
+                }
+                return;
+            }
+            drawPong();
+        }
+
+        // --- FOOSBALL GAME SOUNDS & LOGIC ---
+        function playFoosballManHitSound() { if (synths.foosball.manHit && Tone.context.state === 'running') synths.foosball.manHit.triggerAttackRelease(0.02); }
+        function playFoosballTableWallHitSound() { if (synths.foosball.tableWallHit && Tone.context.state === 'running') synths.foosball.tableWallHit.triggerAttackRelease("G3", "0.05"); }
+        function playFoosballScoreSound() { if (synths.foosball.goalClink && Tone.context.state === 'running') { const now = Tone.now(); synths.foosball.goalClink.triggerAttackRelease("C4", "0.05", now); synths.foosball.goalClink.triggerAttackRelease("E4", "0.05", now + 0.07); synths.foosball.goalClink.triggerAttackRelease("D4", "0.05", now + 0.14); }}
+        
+        let foosballCanvas, foosballCtx, foosballBall, foosballPaddlesP1 = [], foosballPaddlesP2 = [], foosballScore1 = 0, foosballScore2 = 0;
+        const FOOSBALL_PADDLE_HEIGHT = 50, FOOSBALL_PADDLE_WIDTH = 10, FOOSBALL_PADDLE_SPEED = 5, FOOSBALL_BALL_RADIUS = 6, FOOSBALL_GOAL_HEIGHT_PERCENT = 0.35, FOOSBALL_WIN_SCORE = 7;
+        function loadFoosball() {
+            console.log("loadFoosball called");
+            const gameContainer = document.getElementById('foosball-game'); 
+            if (!gameContainer) { console.error("Foosball container 'foosball-game' not found!"); return; }
+            gameContainer.innerHTML = `
+                <div class="score-display" id="foosballScore">P1: 0 - P2: 0</div>
+                <div id="foosballMessages" class="game-messages"></div>
+                <canvas id="foosballCanvas" class="game-canvas"></canvas>
+                <p class="controls-text">P1 (Red): W/S | P2 (Blue): ArrowUp/ArrowDown</p>`;
+            const C = gameContainer; // For consistency with existing code if needed
+            foosballCanvas = document.getElementById('foosballCanvas'); 
+            if (!foosballCanvas) { console.error("Foosball canvas 'foosballCanvas' not found!"); return; }
+            const cW = C.offsetWidth > 0 ? C.offsetWidth : 600;
+            foosballCanvas.width = Math.min(cW - 40, 580); foosballCanvas.height = foosballCanvas.width * 0.6; 
+            foosballCtx = foosballCanvas.getContext('2d');
+            if (!foosballCtx) { console.error("Failed to get 2D context for Foosball canvas!"); return; }
+            initFoosballGame();
+        }
+        function initFoosballGame(){
+            console.log("initFoosballGame called");
+            foosballScore1 = 0; foosballScore2 = 0; updateFoosballScoreDisplay();
+            const messagesContainer = document.getElementById('foosballMessages');
+            if (messagesContainer) messagesContainer.innerHTML = '';
+            if (!foosballCanvas) { console.error("initFoosballGame: foosballCanvas is not defined!"); return; }
+            foosballPaddlesP1 = []; foosballPaddlesP2 = [];
+            const p1_g_x = foosballCanvas.width*0.1, p1_a_x = foosballCanvas.width*0.3, p1_a_s = foosballCanvas.height/4;
+            foosballPaddlesP1.push({ x: p1_g_x, y: foosballCanvas.height / 2 - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            foosballPaddlesP1.push({ x: p1_a_x, y: p1_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            foosballPaddlesP1.push({ x: p1_a_x, y: 2 * p1_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            foosballPaddlesP1.push({ x: p1_a_x, y: 3 * p1_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            const p2_g_x = foosballCanvas.width*0.9-FOOSBALL_PADDLE_WIDTH, p2_a_x = foosballCanvas.width*0.7-FOOSBALL_PADDLE_WIDTH, p2_a_s = foosballCanvas.height/4;
+            foosballPaddlesP2.push({ x: p2_g_x, y: foosballCanvas.height / 2 - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            foosballPaddlesP2.push({ x: p2_a_x, y: p2_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            foosballPaddlesP2.push({ x: p2_a_x, y: 2 * p2_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            foosballPaddlesP2.push({ x: p2_a_x, y: 3 * p2_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
+            resetFoosballBall(); if (activeGameInterval) clearInterval(activeGameInterval); activeGameInterval = setInterval(updateFoosball, 1000 / 60);
+            console.log("Foosball initialized and interval set.");
+        }
+        function resetFoosballBall(){ 
+            if (!foosballCanvas) { console.error("resetFoosballBall: foosballCanvas is not defined!"); return; }
+            foosballBall = { x: foosballCanvas.width / 2, y: foosballCanvas.height / 2, radius: FOOSBALL_BALL_RADIUS, dx: (Math.random() > 0.5 ? 3.5 : -3.5), dy: (Math.random() - 0.5) * 5 }; 
+            if (Math.abs(foosballBall.dy) < 1) foosballBall.dy = Math.random() > 0.5 ? 1.5 : -1.5; 
+        }
+        function updateFoosballScoreDisplay(){ const el=document.getElementById('foosballScore'); if(el) el.textContent = `P1: ${foosballScore1} - P2: ${foosballScore2}`; }
+        function drawFoosball(){
+            if(!foosballCtx || !foosballCanvas) return;
+            foosballCtx.fillStyle = '#006400'; foosballCtx.fillRect(0,0,foosballCanvas.width, foosballCanvas.height);
+            foosballCtx.strokeStyle = '#FFF'; foosballCtx.lineWidth = 2;
+            foosballCtx.beginPath(); foosballCtx.moveTo(foosballCanvas.width/2,0); foosballCtx.lineTo(foosballCanvas.width/2, foosballCanvas.height); foosballCtx.stroke();
+            foosballCtx.beginPath(); foosballCtx.arc(foosballCanvas.width/2, foosballCanvas.height/2, foosballCanvas.height*0.15,0,Math.PI*2); foosballCtx.stroke();
+            const gH = foosballCanvas.height*FOOSBALL_GOAL_HEIGHT_PERCENT, gY=(foosballCanvas.height-gH)/2;
+            foosballCtx.fillStyle = '#333'; foosballCtx.fillRect(0,gY,10,gH); foosballCtx.fillRect(foosballCanvas.width-10,gY,10,gH);
+            foosballCtx.fillStyle = '#F00'; foosballPaddlesP1.forEach(p=>foosballCtx.fillRect(p.x,p.y,p.width,p.height));
+            foosballCtx.fillStyle = '#00F'; foosballPaddlesP2.forEach(p=>foosballCtx.fillRect(p.x,p.y,p.width,p.height));
+            if(foosballBall) { foosballCtx.fillStyle = '#FFF'; foosballCtx.beginPath(); foosballCtx.arc(foosballBall.x,foosballBall.y,foosballBall.radius,0,Math.PI*2); foosballCtx.fill(); }
+        }
+        function handleFoosballInput(){
+            if(!foosballPaddlesP1.length || !foosballPaddlesP2.length || !foosballCanvas) return;
+            let p1m=0,p2m=0; if(gameKeys['w']||gameKeys['W'])p1m=-FOOSBALL_PADDLE_SPEED; if(gameKeys['s']||gameKeys['S'])p1m=FOOSBALL_PADDLE_SPEED;
+            if(gameKeys['ArrowUp'])p2m=-FOOSBALL_PADDLE_SPEED; if(gameKeys['ArrowDown'])p2m=FOOSBALL_PADDLE_SPEED;
+            foosballPaddlesP1.forEach(p=>{p.y+=p1m; if(p.y+p.height<0)p.y=foosballCanvas.height; else if(p.y>foosballCanvas.height)p.y=-p.height;});
+            foosballPaddlesP2.forEach(p=>{p.y+=p2m; if(p.y+p.height<0)p.y=foosballCanvas.height; else if(p.y>foosballCanvas.height)p.y=-p.height;});
+        }
+        function updateFoosball() {
+            if(activeGameType!=='Foosball' || !foosballBall || !foosballPaddlesP1.length || !foosballPaddlesP2.length || !foosballCanvas) return; 
+            handleFoosballInput();
+            foosballBall.x += foosballBall.dx; foosballBall.y += foosballBall.dy;
+            if(foosballBall.y+foosballBall.radius>foosballCanvas.height || foosballBall.y-foosballBall.radius<0) { foosballBall.dy*=-1; playFoosballTableWallHitSound(); }
+            [...foosballPaddlesP1, ...foosballPaddlesP2].forEach(p=>{ 
+                let isMovingTowardsPaddle = (foosballBall.dx < 0 && foosballPaddlesP1.includes(p)) || (foosballBall.dx > 0 && foosballPaddlesP2.includes(p));
+                if (isMovingTowardsPaddle) {
+                     if (foosballBall.x - foosballBall.radius < p.x + p.width && foosballBall.x + foosballBall.radius > p.x && foosballBall.y + foosballBall.radius > p.y && foosballBall.y - foosballBall.radius < p.y + p.height) { 
+                        foosballBall.dx *= -1.03; let dY = foosballBall.y - (p.y + p.height / 2); foosballBall.dy = dY * 0.22; 
+                        if(foosballPaddlesP1.includes(p)) foosballBall.x = p.x + p.width + foosballBall.radius + 0.1; else foosballBall.x = p.x - foosballBall.radius - 0.1;
+                        playFoosballManHitSound();
+                    }
+                }
+            });
+            const gH=foosballCanvas.height*FOOSBALL_GOAL_HEIGHT_PERCENT, gY=(foosballCanvas.height-gH)/2;
+            if (foosballBall.x + foosballBall.radius < 0) {
+                if (foosballBall.y > gY && foosballBall.y < gY + gH) {
+                    foosballScore2++;
+                    updateFoosballScoreDisplay();
+                    resetFoosballBall();
+                    playFoosballScoreSound();
+                } else {
+                    foosballBall.dx *= -1;
+                    foosballBall.x = foosballBall.radius;
+                    playFoosballTableWallHitSound();
+                }
+            } else if (foosballBall.x - foosballBall.radius > foosballCanvas.width) {
+                if (foosballBall.y > gY && foosballBall.y < gY + gH) {
+                    foosballScore1++;
+                    updateFoosballScoreDisplay();
+                    resetFoosballBall();
+                    playFoosballScoreSound();
+                } else {
+                    foosballBall.dx *= -1;
+                    foosballBall.x = foosballCanvas.width - foosballBall.radius;
+                    playFoosballTableWallHitSound();
+                }
+            }
+
+            if (foosballScore1 >= FOOSBALL_WIN_SCORE || foosballScore2 >= FOOSBALL_WIN_SCORE) { 
+                clearInterval(activeGameInterval); 
+                activeGameInterval = null; 
+                const winner = foosballScore1 > foosballScore2 ? "P1 (Red)" : "P2 (Blue)";
+                const messagesContainer = document.getElementById('foosballMessages');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `<h3 class="text-2xl mt-4">${winner} Wins! Final: ${foosballScore1}-${foosballScore2}</h3>`;
+                    const playAgainButton = document.createElement('button');
+                    playAgainButton.textContent = 'Play Foosball Again';
+                    playAgainButton.className = 'menu-button';
+                    playAgainButton.style.backgroundColor = '#2ecc71';
+                    playAgainButton.onclick = initFoosballGame;
+                    messagesContainer.appendChild(playAgainButton);
+                }
+                return;
+            }
+            drawFoosball();
+        }
+
+        // --- ICE HOCKEY GAME SOUNDS & LOGIC ---
+        function playHockeyStickHitSound() { if (synths.hockey.stickHit && Tone.context.state === 'running') synths.hockey.stickHit.triggerAttackRelease("0.05"); }
+        function playHockeyBoardHitSound() { if (synths.hockey.boardHit && Tone.context.state === 'running') synths.hockey.boardHit.triggerAttackRelease("A2", "0.05"); }
+        function playHockeyScoreSound() { if (synths.hockey.score && Tone.context.state === 'running') { synths.hockey.score.triggerAttackRelease("C6", "0.2", Tone.now()); synths.hockey.score.triggerAttackRelease("G5", "0.2", Tone.now() + 0.1); }}
+        
+        let iceHockeyCanvas, iceHockeyCtx, puck, stickP1, stickP2, iceHockeyScore1 = 0, iceHockeyScore2 = 0;
+        const STICK_HEIGHT = 70, STICK_WIDTH = 10, PUCK_RADIUS = 8, STICK_SPEED = 6, ICE_HOCKEY_GOAL_HEIGHT_PERCENT = 0.33, ICE_HOCKEY_WIN_SCORE = 5;
+        
+        function loadIceHockey() { 
+            console.log("loadIceHockey called");
+            const C = document.getElementById('ice-hockey-game'); 
+            if (!C) { console.error("Ice Hockey container 'ice-hockey-game' not found!"); return; } // C is gameContainer
+            C.innerHTML = `
+                <div class="score-display" id="iceHockeyScore">P1:0-P2:0</div>
+                <div id="iceHockeyMessages" class="game-messages"></div>
+                <canvas id="iceHockeyCanvas" class="game-canvas"></canvas>
+                <p class="controls-text">P1:W/S|P2:Up/Down</p>`;
+
+            iceHockeyCanvas = document.getElementById('iceHockeyCanvas'); 
+            if (!iceHockeyCanvas) { console.error("Ice Hockey canvas 'iceHockeyCanvas' not found!"); return; }
+            const cW = C.offsetWidth > 0 ? C.offsetWidth : 600; iceHockeyCanvas.width = Math.min(cW - 40, 560); iceHockeyCanvas.height = iceHockeyCanvas.width * 0.65; 
+            iceHockeyCtx = iceHockeyCanvas.getContext('2d'); 
+            if (!iceHockeyCtx) { console.error("Failed to get 2D context for Ice Hockey canvas!"); return; }
+            initIceHockeyGame();
+        } 
+        function initIceHockeyGame() { 
+            console.log("initIceHockeyGame called");
+            iceHockeyScore1 = 0; iceHockeyScore2 = 0; updateIceHockeyScoreDisplay(); 
+            const messagesContainer = document.getElementById('iceHockeyMessages');
+            if (messagesContainer) messagesContainer.innerHTML = '';
+            if (!iceHockeyCanvas) { console.error("initIceHockeyGame: iceHockeyCanvas is not defined!"); return; }
+            stickP1 = { x: 20, y: iceHockeyCanvas.height / 2 - STICK_HEIGHT / 2, width: STICK_WIDTH, height: STICK_HEIGHT, color: '#D10000' }; 
+            stickP2 = { x: iceHockeyCanvas.width - STICK_WIDTH - 20, y: iceHockeyCanvas.height / 2 - STICK_HEIGHT / 2, width: STICK_WIDTH, height: STICK_HEIGHT, color: '#001F95' }; 
+            resetIceHockeyPuck(); 
+            if (activeGameInterval) clearInterval(activeGameInterval); 
+            activeGameInterval = setInterval(updateIceHockey, 1000 / 60);
+            console.log("Ice Hockey initialized and interval set.");
+        } 
+        function resetIceHockeyPuck() { 
+             if (!iceHockeyCanvas) { console.error("resetIceHockeyPuck: iceHockeyCanvas is not defined!"); return; }
+            puck = { x: iceHockeyCanvas.width / 2, y: iceHockeyCanvas.height / 2, radius: PUCK_RADIUS, dx: (Math.random() > 0.5 ? 4 : -4) * 0.9, dy: (Math.random() - 0.5) * 5 * 0.9, color: '#1A1A1A' };
+            if (Math.abs(puck.dy) < 0.8) puck.dy = Math.random() > 0.5 ? 1.2 : -1.2;
+        }
+        function updateIceHockeyScoreDisplay() { const el = document.getElementById('iceHockeyScore'); if (el) el.textContent = `P1: ${iceHockeyScore1} - P2: ${iceHockeyScore2}`; }
+        function drawIceHockeyRink() {
+            if(!iceHockeyCtx || !iceHockeyCanvas) return;
+            iceHockeyCtx.fillStyle = '#D0EFFF'; iceHockeyCtx.fillRect(0,0,iceHockeyCanvas.width,iceHockeyCanvas.height);
+            iceHockeyCtx.strokeStyle = '#666'; iceHockeyCtx.lineWidth = 4; iceHockeyCtx.strokeRect(0,0,iceHockeyCanvas.width,iceHockeyCanvas.height);
+            iceHockeyCtx.strokeStyle = '#FF0000'; iceHockeyCtx.lineWidth = 3; iceHockeyCtx.beginPath(); iceHockeyCtx.moveTo(iceHockeyCanvas.width/2,0); iceHockeyCtx.lineTo(iceHockeyCanvas.width/2,iceHockeyCanvas.height); iceHockeyCtx.stroke();
+            iceHockeyCtx.strokeStyle = '#0033A0'; iceHockeyCtx.lineWidth = 2; iceHockeyCtx.beginPath(); iceHockeyCtx.arc(iceHockeyCanvas.width/2,iceHockeyCanvas.height/2,iceHockeyCanvas.height*0.12,0,Math.PI*2); iceHockeyCtx.stroke();
+            iceHockeyCtx.fillStyle = '#0033A0'; iceHockeyCtx.beginPath(); iceHockeyCtx.arc(iceHockeyCanvas.width/2,iceHockeyCanvas.height/2,5,0,Math.PI*2); iceHockeyCtx.fill();
+            const gH = iceHockeyCanvas.height*ICE_HOCKEY_GOAL_HEIGHT_PERCENT, gW=15, gPR=4, gY=(iceHockeyCanvas.height-gH)/2;
+            iceHockeyCtx.strokeStyle = '#B0B0B0'; iceHockeyCtx.lineWidth = gPR*2; iceHockeyCtx.beginPath(); iceHockeyCtx.moveTo(gW,gY); iceHockeyCtx.lineTo(gW,gY+gH); iceHockeyCtx.stroke();
+            iceHockeyCtx.strokeStyle = '#E0E0E0'; iceHockeyCtx.lineWidth = 1; for(let i=1;i<5;i++){iceHockeyCtx.beginPath();iceHockeyCtx.moveTo(0,gY+(gH/5)*i);iceHockeyCtx.lineTo(gW,gY+(gH/5)*i);iceHockeyCtx.stroke();}
+            iceHockeyCtx.strokeStyle = '#B0B0B0'; iceHockeyCtx.lineWidth = gPR*2; iceHockeyCtx.beginPath(); iceHockeyCtx.moveTo(iceHockeyCanvas.width-gW,gY); iceHockeyCtx.lineTo(iceHockeyCanvas.width-gW,gY+gH); iceHockeyCtx.stroke();
+            iceHockeyCtx.strokeStyle = '#E0E0E0'; for(let i=1;i<5;i++){iceHockeyCtx.beginPath();iceHockeyCtx.moveTo(iceHockeyCanvas.width,gY+(gH/5)*i);iceHockeyCtx.lineTo(iceHockeyCanvas.width-gW,gY+(gH/5)*i);iceHockeyCtx.stroke();}
+        }
+        function drawIceHockey() { 
+            if(!iceHockeyCtx) return;
+            drawIceHockeyRink();
+            if(stickP1) { iceHockeyCtx.fillStyle = stickP1.color; iceHockeyCtx.fillRect(stickP1.x,stickP1.y,stickP1.width,stickP1.height); }
+            if(stickP2) { iceHockeyCtx.fillStyle = stickP2.color; iceHockeyCtx.fillRect(stickP2.x,stickP2.y,stickP2.width,stickP2.height); }
+            if(puck) { iceHockeyCtx.fillStyle = puck.color; iceHockeyCtx.beginPath(); iceHockeyCtx.arc(puck.x,puck.y,puck.radius,0,Math.PI*2); iceHockeyCtx.fill(); }
+        }
+        function handleIceHockeyInput() { 
+            if(!stickP1 || !stickP2 || !iceHockeyCanvas) return;
+            if(gameKeys['w']||gameKeys['W'])stickP1.y-=STICK_SPEED; if(gameKeys['s']||gameKeys['S'])stickP1.y+=STICK_SPEED;
+            if(gameKeys['ArrowUp'])stickP2.y-=STICK_SPEED; if(gameKeys['ArrowDown'])stickP2.y+=STICK_SPEED;
+            stickP1.y=Math.max(0,Math.min(iceHockeyCanvas.height-stickP1.height,stickP1.y)); stickP2.y=Math.max(0,Math.min(iceHockeyCanvas.height-stickP2.height,stickP2.y));
+        }
+        function updateIceHockey() { 
+            if (activeGameType !== 'Ice Hockey' || !puck || !stickP1 || !stickP2 || !iceHockeyCanvas) return; 
+            handleIceHockeyInput(); 
+            puck.x += puck.dx; puck.y += puck.dy;
+            if (puck.y + puck.radius > iceHockeyCanvas.height || puck.y - puck.radius < 0) { puck.dy *= -1; playHockeyBoardHitSound(); }
+            if (puck.dx < 0 && puck.x - puck.radius < stickP1.x + stickP1.width && puck.x - puck.radius > stickP1.x && puck.y + puck.radius > stickP1.y && puck.y - puck.radius < stickP1.y + stickP1.height) { puck.dx *= -1.02; let dY = puck.y - (stickP1.y + stickP1.height / 2); puck.dy = dY * 0.28; puck.x = stickP1.x + stickP1.width + puck.radius; playHockeyStickHitSound(); }
+            if (puck.dx > 0 && puck.x + puck.radius > stickP2.x && puck.x + puck.radius < stickP2.x + stickP2.width && puck.y + puck.radius > stickP2.y && puck.y - puck.radius < stickP2.y + stickP2.height) { puck.dx *= -1.02; let dY = puck.y - (stickP2.y + stickP2.height / 2); puck.dy = dY * 0.28; puck.x = stickP2.x - puck.radius; playHockeyStickHitSound(); }
+            const gH = iceHockeyCanvas.height*ICE_HOCKEY_GOAL_HEIGHT_PERCENT, gY=(iceHockeyCanvas.height-gH)/2, gL1=5, gL2=iceHockeyCanvas.width-5;
+            
+            if (puck.x - puck.radius < gL1) {
+                if (puck.y > gY && puck.y < gY + gH) {
+                    iceHockeyScore2++; 
+                    updateIceHockeyScoreDisplay(); 
+                    resetIceHockeyPuck(); 
+                    playHockeyScoreSound();
+                } else {
+                    puck.dx *= -1; 
+                    puck.x = gL1 + puck.radius; 
+                    playHockeyBoardHitSound();
+                }
+            } else if (puck.x + puck.radius > gL2) {
+                if (puck.y > gY && puck.y < gY + gH) {
+                    iceHockeyScore1++; 
+                    updateIceHockeyScoreDisplay(); 
+                    resetIceHockeyPuck(); 
+                    playHockeyScoreSound();
+                } else {
+                    puck.dx *= -1; 
+                    puck.x = gL2 - puck.radius; 
+                    playHockeyBoardHitSound();
+                }
+            }
+
+            if (iceHockeyScore1 >= ICE_HOCKEY_WIN_SCORE || iceHockeyScore2 >= ICE_HOCKEY_WIN_SCORE) { 
+                clearInterval(activeGameInterval); 
+                activeGameInterval = null; 
+                const winner = iceHockeyScore1 > iceHockeyScore2 ? "P1 (Red)" : "P2 (Blue)";
+                const messagesContainer = document.getElementById('iceHockeyMessages');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `<h3 class="text-2xl mt-4">${winner} Wins! Final: ${iceHockeyScore1}-${iceHockeyScore2}</h3>`;
+                    const playAgainButton = document.createElement('button');
+                    playAgainButton.textContent = 'Play Hockey Again';
+                    playAgainButton.className = 'menu-button';
+                    playAgainButton.style.backgroundColor = '#2ecc71';
+                    playAgainButton.onclick = initIceHockeyGame;
+                    messagesContainer.appendChild(playAgainButton);
+                }
+                return; 
+            }
+            drawIceHockey();
+        }
+
+        // --- ASSHOLE PONG GAME SOUNDS ---
+        function playAPPaddle1HitSound() { if (synths.assholePong.paddle1Hit && Tone.context.state === 'running') { synths.assholePong.paddle1Hit.triggerAttackRelease("B3", "0.03", Tone.now(), Math.random() * 0.1 + 0.9); synths.assholePong.paddle1Hit.detune.setValueAtTime( (Math.random()-0.5) * 50 , Tone.now()); }}
+        function playAPPaddle2HitSound() { if (synths.assholePong.paddle2Hit && Tone.context.state === 'running') synths.assholePong.paddle2Hit.triggerAttackRelease("G3", "0.06");}
+        function playAPWallHitSound() { if (synths.assholePong.wallHit && Tone.context.state === 'running') synths.assholePong.wallHit.triggerAttackRelease("0.02");}
+        function playAPScoreSound() { if (synths.assholePong.score && Tone.context.state === 'running') { const now = Tone.now(); synths.assholePong.score.triggerAttackRelease("C#5", "0.1", now); synths.assholePong.score.triggerAttackRelease("F5", "0.1", now + 0.08); }}
+        function playAPGlitchSound() { if (synths.assholePong.glitch && Tone.context.state === 'running') synths.assholePong.glitch.triggerAttackRelease("0.01");}
+
+        // --- ASSHOLE PONG GAME LOGIC ---
+        let assholePongCanvas, assholePongCtx, apBall, apPaddle1, apPaddle2, apScore1 = 0, apScore2 = 0;
+        const AP_PADDLE_WIDTH = 10, AP_PADDLE1_HEIGHT = 70, AP_PADDLE2_HEIGHT_FACTOR = 0.85, AP_BALL_RADIUS = 7, AP_PADDLE_SPEED = 6, AP_WIN_SCORE = 7;
+        const GLITCH_CHANCE = 0.15, GLITCH_DURATION_FRAMES = 5; let p1GlitchTimer = 0, p1GlitchType = null;
+        
+        function loadAssholePong() { 
+            console.log("loadAssholePong called");
+            const gameContainer = document.getElementById('asshole-pong-game'); 
+            if (!gameContainer) { console.error("Asshole Pong container 'asshole-pong-game' not found!"); return; }
+            gameContainer.innerHTML = `
+                <div class="score-display" id="assholePongScore">P1:0-P2:0</div>
+                <div id="assholePongMessages" class="game-messages"></div>
+                <canvas id="assholePongCanvas" class="game-canvas"></canvas>
+                <p class="controls-text">P1 (Glitchy):W/S | P2 (OP):Up/Down</p>`;
+            const C = gameContainer; // For consistency
+            assholePongCanvas = document.getElementById('assholePongCanvas'); 
+            if (!assholePongCanvas) { console.error("Asshole Pong canvas 'assholePongCanvas' not found!"); return; }
+            const cW = C.offsetWidth > 0 ? C.offsetWidth : 600; assholePongCanvas.width = Math.min(cW - 40, 560); assholePongCanvas.height = assholePongCanvas.width * 0.6; 
+            assholePongCtx = assholePongCanvas.getContext('2d'); 
+            if (!assholePongCtx) { console.error("Failed to get 2D context for Asshole Pong canvas!"); return; }
+            initAssholePongGame();
+        } 
+        function initAssholePongGame(){ 
+            console.log("initAssholePongGame called");
+            apScore1=0; apScore2=0; updateAssholePongScoreDisplay(); p1GlitchTimer=0; p1GlitchType=null; 
+            const messagesContainer = document.getElementById('assholePongMessages');
+            if (messagesContainer) messagesContainer.innerHTML = '';
+            if (!assholePongCanvas) { console.error("initAssholePongGame: assholePongCanvas is not defined!"); return; }
+            apPaddle1 = { x:10, y:assholePongCanvas.height/2-AP_PADDLE1_HEIGHT/2, width:AP_PADDLE_WIDTH, height:AP_PADDLE1_HEIGHT, color:'#fde047'}; 
+            const p2H = assholePongCanvas.height*AP_PADDLE2_HEIGHT_FACTOR; 
+            apPaddle2 = { x:assholePongCanvas.width-AP_PADDLE_WIDTH-10, y:assholePongCanvas.height/2-p2H/2, width:AP_PADDLE_WIDTH, height:p2H, color:'#a78bfa'}; 
+            resetAssholePongBall(); if(activeGameInterval)clearInterval(activeGameInterval); activeGameInterval=setInterval(updateAssholePong,1000/60);
+            console.log("Asshole Pong initialized and interval set.");
+        } 
+        function resetAssholePongBall(){ 
+            if (!assholePongCanvas) { console.error("resetAssholePongBall: assholePongCanvas is not defined!"); return; }
+            apBall = { x:assholePongCanvas.width/2,y:assholePongCanvas.height/2,radius:AP_BALL_RADIUS,dx:(Math.random()>0.5?3.5:-3.5),dy:(Math.random()-0.5)*5,color:'#fff'}; 
+            if(Math.abs(apBall.dy)<0.5)apBall.dy=Math.random()>0.5?1:-1;
+        }
+        function updateAssholePongScoreDisplay(){const el=document.getElementById('assholePongScore'); if(el)el.textContent=`P1: ${apScore1} - P2: ${apScore2}`;}
+        
+        function drawAssholePong(){
+            if(!assholePongCtx || !assholePongCanvas) return;
+            assholePongCtx.clearRect(0,0, assholePongCanvas.width, assholePongCanvas.height); // THIS LINE WAS UNCOMMENTED
+            
+            if(apPaddle1) { assholePongCtx.fillStyle=apPaddle1.color; assholePongCtx.fillRect(apPaddle1.x,apPaddle1.y,apPaddle1.width,apPaddle1.height); }
+            if(apPaddle2) { assholePongCtx.fillStyle=apPaddle2.color; assholePongCtx.fillRect(apPaddle2.x,apPaddle2.y,apPaddle2.width,apPaddle2.height); }
+            if(apBall) { assholePongCtx.fillStyle=apBall.color; assholePongCtx.beginPath(); assholePongCtx.arc(apBall.x,apBall.y,apBall.radius,0,Math.PI*2); assholePongCtx.fill(); }
+            
+            assholePongCtx.strokeStyle='#facc15'; assholePongCtx.lineWidth=2; assholePongCtx.setLineDash([5,5]); assholePongCtx.beginPath(); assholePongCtx.moveTo(assholePongCanvas.width/2,0); assholePongCtx.lineTo(assholePongCanvas.width/2,assholePongCanvas.height); assholePongCtx.stroke(); assholePongCtx.setLineDash([]);
+        }
+
+        function handleAssholePongInput(){
+            if(!apPaddle1 || !apPaddle2 || !assholePongCanvas) return;
+            if (p1GlitchTimer > 0) {
+                p1GlitchTimer--;
+                if (p1GlitchType === 'reverse') { if (gameKeys['w'] || gameKeys['W']) apPaddle1.y += AP_PADDLE_SPEED / 2; if (gameKeys['s'] || gameKeys['S']) apPaddle1.y -= AP_PADDLE_SPEED / 2; } 
+            } else { 
+                let p1AttemptedMove = (gameKeys['w'] || gameKeys['W'] || gameKeys['s'] || gameKeys['S']);
+                let p1MovedThisFrame = false;
+                if (p1AttemptedMove && Math.random() < GLITCH_CHANCE) {
+                    p1GlitchTimer = GLITCH_DURATION_FRAMES; const randGlitch = Math.random();
+                    if (randGlitch < 0.33) p1GlitchType = 'ignore'; else if (randGlitch < 0.66) p1GlitchType = 'reverse'; else { p1GlitchType = 'jump'; apPaddle1.y += (Math.random() - 0.5) * 60; }
+                    playAPGlitchSound(); p1MovedThisFrame = true; 
+                }
+                if (!p1MovedThisFrame) { if (gameKeys['w'] || gameKeys['W']) apPaddle1.y -= AP_PADDLE_SPEED; if (gameKeys['s'] || gameKeys['S']) apPaddle1.y += AP_PADDLE_SPEED; }
+            }
+            if (gameKeys['ArrowUp']) apPaddle2.y -= AP_PADDLE_SPEED; if (gameKeys['ArrowDown']) apPaddle2.y += AP_PADDLE_SPEED;
+            apPaddle1.y=Math.max(0,Math.min(assholePongCanvas.height-apPaddle1.height,apPaddle1.y)); 
+            apPaddle2.y=Math.max(0,Math.min(assholePongCanvas.height-apPaddle2.height,apPaddle2.y));
+        }
+
+        function updateAssholePong() { 
+            if(activeGameType!=='Asshole Pong' || !apBall || !apPaddle1 || !apPaddle2 || !assholePongCanvas)return; 
+            handleAssholePongInput(); 
+            apBall.x+=apBall.dx; apBall.y+=apBall.dy;
+            if(apBall.y+apBall.radius>assholePongCanvas.height||apBall.y-apBall.radius<0) { apBall.dy*=-1; playAPWallHitSound(); }
+            if(apBall.dx<0&&apBall.x-apBall.radius<apPaddle1.x+apPaddle1.width&&apBall.x-apBall.radius>apPaddle1.x&&apBall.y+apBall.radius>apPaddle1.y&&apBall.y-apBall.radius<apPaddle1.y+apPaddle1.height){ apBall.dx*=-1;let dY=apBall.y-(apPaddle1.y+apPaddle1.height/2);apBall.dy=dY*0.25;apBall.x=apPaddle1.x+apPaddle1.width+apBall.radius; playAPPaddle1HitSound(); }
+            if(apBall.dx>0&&apBall.x+apBall.radius>apPaddle2.x&&apBall.x+apBall.radius<apPaddle2.x+apPaddle2.width&&apBall.y+apBall.radius>apPaddle2.y&&apBall.y-apBall.radius<apPaddle2.y+apPaddle2.height){ apBall.dx*=-1;let dY=apBall.y-(apPaddle2.y+apPaddle2.height/2);apBall.dy=dY*0.25;apBall.x=apPaddle2.x-apBall.radius; playAPPaddle2HitSound(); }
+            if(apBall.x+apBall.radius<0){ apScore2++;updateAssholePongScoreDisplay();resetAssholePongBall(); playAPScoreSound(); } 
+            else if(apBall.x-apBall.radius>assholePongCanvas.width){ apScore1++;updateAssholePongScoreDisplay();resetAssholePongBall(); playAPScoreSound(); }
+            
+            if (apScore1 >= AP_WIN_SCORE || apScore2 >= AP_WIN_SCORE) { 
+                clearInterval(activeGameInterval);
+                activeGameInterval = null;
+                const winner = apScore1 > apScore2 ? "P1 (somehow?!)" : "P2 (obviously)";
+                const messagesContainer = document.getElementById('assholePongMessages');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = `
+                        <h3 class="text-2xl mt-4">${winner} Wins!</h3>
+                        <p>Final Score: P1:${apScore1}-P2:${apScore2}</p>`;
+                    
+                    const playAgainButton = document.createElement('button');
+                    playAgainButton.textContent = 'Play Asshole Pong Again';
+                    playAgainButton.className = 'menu-button';
+                    playAgainButton.style.backgroundColor = '#fde047';
+                    playAgainButton.style.color = '#581c87';
+                    playAgainButton.onclick = initAssholePongGame;
+                    messagesContainer.appendChild(playAgainButton);
+                }
+                return; 
+            }
+            drawAssholePong();
+        }
+    </script>
+</body>
+</html>
