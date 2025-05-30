@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Olympics - All Games Restored</title>
+    <title>Video Olympics</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -127,7 +127,8 @@
     <script>
         const gameArea = document.getElementById('game-area');
         const mainMenu = document.getElementById('main-menu');
-        let activeGameInterval = null; 
+        let activeGameInterval = null; // Will be used by non-class games, or can be removed if all games are classes
+        let currentGameInstance = null; // To hold the active game object
         let activeGameType = null; 
 
         let gameKeys = {};
@@ -199,20 +200,20 @@
         async function selectGame(gameName) { 
             console.log(`selectGame started for: ${gameName}`);
             try {
-                if (activeGameInterval) {
+                if (currentGameInstance && typeof currentGameInstance.destroy === 'function') {
+                    currentGameInstance.destroy();
+                    currentGameInstance = null;
+                    console.log("Previous game instance destroyed.");
+                } else if (activeGameInterval) { // Fallback for non-class based games
                     clearInterval(activeGameInterval);
                     activeGameInterval = null;
-                    console.log("Cleared activeGameInterval");
+                    console.log("Cleared activeGameInterval (legacy).");
                 }
-
-                // CRITICAL: This manual reset of global variables is error-prone and hard to maintain.
-                // Ideally, each game should have its own cleanup/reset method that is called here,
-                // or game objects should be self-contained and new instances created.
-                puck = undefined; stickP1 = undefined; stickP2 = undefined; iceHockeyCanvas = undefined; iceHockeyCtx = undefined;
-                pongBall = undefined; pongPaddle1 = undefined; pongPaddle2 = undefined; pongCanvas = undefined; pongCtx = undefined;
-                foosballBall = undefined; foosballPaddlesP1 = []; foosballPaddlesP2 = []; foosballCanvas = undefined; foosballCtx = undefined;
-                apBall = undefined; apPaddle1 = undefined; apPaddle2 = undefined; assholePongCanvas = undefined; assholePongCtx = undefined;
-                console.log("Global game object references reset (Note: This is a temporary measure. Consider encapsulating game states.)");
+                
+                // Resetting global game state variables - this becomes less necessary as games are converted to classes.
+                // For now, keep it for games not yet converted.
+                // puck = undefined; stickP1 = undefined; stickP2 = undefined; iceHockeyCanvas = undefined; iceHockeyCtx = undefined; // etc.
+                console.log("Game objects reset");
 
                 await initializeAudio(); 
                 console.log("initializeAudio completed");
@@ -246,11 +247,17 @@
                 activeGameType = gameName; 
                 console.log(`activeGameType set to: ${activeGameType}`);
 
-                if (gameName === 'Pong') loadPong();
-                else if (gameName === 'Foosball') loadFoosball();
-                else if (gameName === 'Ice Hockey') loadIceHockey();
-                else if (gameName === 'Asshole Pong') loadAssholePong();
-                console.log(`${gameName} load function called`);
+                if (gameName === 'Pong') {
+                    // gameContent is the div with id e.g., 'pong-game'
+                    currentGameInstance = new PongGame(gameContent, gameKeys, synths.pong);
+                } else if (gameName === 'Foosball') {
+                    loadFoosball(); // Keep old way until FoosballGame class is made
+                } else if (gameName === 'Ice Hockey') {
+                    loadIceHockey(); // Keep old way
+                } else if (gameName === 'Asshole Pong') {
+                    loadAssholePong(); // Keep old way
+                }
+                console.log(`${gameName} instance created or load function called`);
                 
                 document.addEventListener('keydown', gameKeyDownHandler); 
                 document.addEventListener('keyup', gameKeyUpHandler);
@@ -271,7 +278,12 @@
 
         function showMainMenu() { 
             console.log("showMainMenu called");
-            if (activeGameInterval) { clearInterval(activeGameInterval); activeGameInterval = null; console.log("Cleared activeGameInterval in showMainMenu");}
+            if (currentGameInstance && typeof currentGameInstance.destroy === 'function') {
+                currentGameInstance.destroy();
+                currentGameInstance = null;
+                console.log("Destroyed current game instance in showMainMenu");
+            } else if (activeGameInterval) { // Fallback for non-class based games
+                clearInterval(activeGameInterval); activeGameInterval = null; console.log("Cleared activeGameInterval in showMainMenu (legacy)");}
             if(mainMenu) mainMenu.style.display = 'block'; 
             if(gameArea) {
                 gameArea.innerHTML = 'Select a game to start! (Click to enable audio)'; 
@@ -282,95 +294,206 @@
             console.log("Main menu shown, listeners removed, activeGameType reset.");
         }
 
-        // --- PONG GAME SOUNDS & LOGIC ---
-        function playPongPaddleHitSound() { if (synths.pong.paddleHit && Tone.context.state === 'running') synths.pong.paddleHit.triggerAttackRelease("C4", "0.05"); }
-        function playPongScoreSound() { if (synths.pong.score && Tone.context.state === 'running') { synths.pong.score.triggerAttackRelease("A5", "0.15", Tone.now()); synths.pong.score.triggerAttackRelease("E5", "0.1", Tone.now() + 0.07); }}
-        function playPongWallHitSound() { if (synths.pong.wallHit && Tone.context.state === 'running') synths.pong.wallHit.triggerAttackRelease("G2", "0.02");}
-        
-        let pongCanvas, pongCtx, pongBall, pongPaddle1, pongPaddle2, pongScore1 = 0, pongScore2 = 0;
-        const PONG_PADDLE_HEIGHT = 80, PONG_PADDLE_WIDTH = 10, PONG_BALL_RADIUS = 7, PONG_PADDLE_SPEED = 6, PONG_WIN_SCORE = 5;
-        
-        function loadPong() { 
-            console.log("loadPong called");
-            const gameContainer = document.getElementById('pong-game'); 
-            if (!gameContainer) { console.error("Pong container 'pong-game' not found!"); return; }
-            gameContainer.innerHTML = `
-                <div class="score-display" id="pongScore">P1:0-P2:0</div>
-                <div id="pongMessages" class="game-messages"></div>
-                <canvas id="pongCanvas" class="game-canvas"></canvas>
-                <p class="controls-text">P1:W/S|P2:Up/Down</p>`;
-            const C = gameContainer; // Keep C for brevity if preferred in existing logic
-            if (!C) { console.error("Pong container 'pong-game' not found!"); return; }
-            C.innerHTML = `<div class="score-display" id="pongScore">P1:0-P2:0</div><canvas id="pongCanvas" class="game-canvas"></canvas><p class="controls-text">P1:W/S|P2:Up/Down</p>`;
-            pongCanvas = document.getElementById('pongCanvas'); 
-            if (!pongCanvas) { console.error("Pong canvas 'pongCanvas' not found!"); return; }
-            const cW = C.offsetWidth > 0 ? C.offsetWidth : 600; pongCanvas.width = Math.min(cW - 40, 560); pongCanvas.height = pongCanvas.width * 0.6; 
-            pongCtx = pongCanvas.getContext('2d'); 
-            if (!pongCtx) { console.error("Failed to get 2D context for Pong canvas!"); return; }
-            initPongGame();
-        }
-        function initPongGame(){ 
-            console.log("initPongGame called");
-            pongScore1=0; pongScore2=0; updatePongScoreDisplay();
-            const messagesContainer = document.getElementById('pongMessages');
-            if (messagesContainer) messagesContainer.innerHTML = ''; // Clear previous win messages/buttons
-            if (!pongCanvas) { console.error("initPongGame: pongCanvas is not defined!"); return; }
-            pongPaddle1 = { x: 10, y: pongCanvas.height / 2 - PONG_PADDLE_HEIGHT / 2, width: PONG_PADDLE_WIDTH, height: PONG_PADDLE_HEIGHT };
-            pongPaddle2 = { x: pongCanvas.width - PONG_PADDLE_WIDTH - 10, y: pongCanvas.height / 2 - PONG_PADDLE_HEIGHT / 2, width: PONG_PADDLE_WIDTH, height: PONG_PADDLE_HEIGHT };
-            resetPongBall(); 
-            if (activeGameInterval) clearInterval(activeGameInterval); 
-            activeGameInterval = setInterval(updatePong, 1000 / 60); 
-            console.log("Pong initialized and interval set.");
-        }
-        function resetPongBall(){ 
-            if (!pongCanvas) { console.error("resetPongBall: pongCanvas is not defined!"); return; }
-            pongBall = { x: pongCanvas.width / 2, y: pongCanvas.height / 2, radius: PONG_BALL_RADIUS, dx: (Math.random() > 0.5 ? 3.5 : -3.5), dy: (Math.random() - 0.5) * 5 }; 
-            if (Math.abs(pongBall.dy) < 0.5) pongBall.dy = Math.random() > 0.5 ? 1 : -1; 
-        }
-        function updatePongScoreDisplay(){ const el=document.getElementById('pongScore'); if(el) el.textContent = `P1: ${pongScore1} - P2: ${pongScore2}`; }
-        function drawPong(){ 
-            if (!pongCtx || !pongCanvas) return; 
-            pongCtx.fillStyle = '#000'; pongCtx.fillRect(0,0,pongCanvas.width,pongCanvas.height); pongCtx.fillStyle = '#fff';
-            if(pongPaddle1) pongCtx.fillRect(pongPaddle1.x, pongPaddle1.y, pongPaddle1.width, pongPaddle1.height); 
-            if(pongPaddle2) pongCtx.fillRect(pongPaddle2.x, pongPaddle2.y, pongPaddle2.width, pongPaddle2.height);
-            if(pongBall) { pongCtx.beginPath(); pongCtx.arc(pongBall.x, pongBall.y, pongBall.radius, 0, Math.PI * 2); pongCtx.fill(); }
-            pongCtx.strokeStyle = '#555'; pongCtx.lineWidth = 2; pongCtx.beginPath(); pongCtx.moveTo(pongCanvas.width/2,0); pongCtx.lineTo(pongCanvas.width/2,pongCanvas.height); pongCtx.stroke();
-        }
-        function handlePongInput(){ 
-            if (!pongPaddle1 || !pongPaddle2 || !pongCanvas) return;
-            if (gameKeys['w'] || gameKeys['W']) pongPaddle1.y -= PONG_PADDLE_SPEED; if (gameKeys['s'] || gameKeys['S']) pongPaddle1.y += PONG_PADDLE_SPEED;
-            if (gameKeys['ArrowUp']) pongPaddle2.y -= PONG_PADDLE_SPEED; if (gameKeys['ArrowDown']) pongPaddle2.y += PONG_PADDLE_SPEED;
-            pongPaddle1.y = Math.max(0, Math.min(pongCanvas.height - pongPaddle1.height, pongPaddle1.y));
-            pongPaddle2.y = Math.max(0, Math.min(pongCanvas.height - pongPaddle2.height, pongPaddle2.y));
-        }
-        function updatePong() { 
-            if (activeGameType !== 'Pong' || !pongBall || !pongPaddle1 || !pongPaddle2 || !pongCanvas) return; 
-            handlePongInput();
-            pongBall.x += pongBall.dx; pongBall.y += pongBall.dy;
-            if (pongBall.y + pongBall.radius > pongCanvas.height || pongBall.y - pongBall.radius < 0) { pongBall.dy *= -1; playPongWallHitSound(); }
-            if (pongBall.dx < 0 && pongBall.x - pongBall.radius < pongPaddle1.x + pongPaddle1.width && pongBall.x - pongBall.radius > pongPaddle1.x && pongBall.y + pongBall.radius > pongPaddle1.y && pongBall.y - pongBall.radius < pongPaddle1.y + pongPaddle1.height) { pongBall.dx *= -1; let dY = pongBall.y - (pongPaddle1.y + pongPaddle1.height / 2); pongBall.dy = dY * 0.25; playPongPaddleHitSound(); pongBall.x = pongPaddle1.x + pongPaddle1.width + pongBall.radius;}
-            if (pongBall.dx > 0 && pongBall.x + pongBall.radius > pongPaddle2.x && pongBall.x + pongBall.radius < pongPaddle2.x + pongPaddle2.width && pongBall.y + pongBall.radius > pongPaddle2.y && pongBall.y - pongBall.radius < pongPaddle2.y + pongPaddle2.height) { pongBall.dx *= -1; let dY = pongBall.y - (pongPaddle2.y + pongPaddle2.height / 2); pongBall.dy = dY * 0.25; playPongPaddleHitSound(); pongBall.x = pongPaddle2.x - pongBall.radius;}
-            if (pongBall.x + pongBall.radius < 0) { pongScore2++; updatePongScoreDisplay(); resetPongBall(); playPongScoreSound(); } 
-            else if (pongBall.x - pongBall.radius > pongCanvas.width) { pongScore1++; updatePongScoreDisplay(); resetPongBall(); playPongScoreSound(); }
-            
-            if (pongScore1 >= PONG_WIN_SCORE || pongScore2 >= PONG_WIN_SCORE) { 
-                clearInterval(activeGameInterval); 
-                activeGameInterval = null; 
-                const winner = pongScore1 > pongScore2 ? "Player 1" : "Player 2";
-                const messagesContainer = document.getElementById('pongMessages');
-                if (messagesContainer) {
-                    messagesContainer.innerHTML = `<h3 class="text-2xl mt-4">${winner} Wins! Final: ${pongScore1}-${pongScore2}</h3>`;
-                    const playAgainButton = document.createElement('button');
-                    playAgainButton.textContent = 'Play Pong Again';
-                    playAgainButton.className = 'menu-button';
-                    playAgainButton.style.backgroundColor = '#2ecc71';
-                    playAgainButton.onclick = initPongGame; // initPongGame will clear messages
-                    messagesContainer.appendChild(playAgainButton);
-                }
-                return;
+        // --- PONG GAME CLASS ---
+        class PongGame {
+            constructor(parentElement, gameKeysRef, audioSynths) {
+                this.parentElement = parentElement; 
+                this.gameKeys = gameKeysRef;      
+                this.synths = audioSynths;        
+
+                // Game constants
+                this.PADDLE_HEIGHT = 80;
+                this.PADDLE_WIDTH = 10;
+                this.BALL_RADIUS = 7;
+                this.PADDLE_SPEED = 6;
+                this.WIN_SCORE = 5;
+
+                // Game state
+                this.canvas = null;
+                this.ctx = null;
+                this.ball = null;
+                this.paddle1 = null;
+                this.paddle2 = null;
+                this.score1 = 0;
+                this.score2 = 0;
+                
+                this.scoreDisplayElement = null;
+                this.messagesContainer = null;
+
+                this.gameLoopInterval = null;
+
+                this._setupDOM(); 
+                this.init();      
             }
-            drawPong();
+
+            _setupDOM() {
+                this.parentElement.innerHTML = `
+                    <div class="score-display" id="pongScoreDisplay">P1:0-P2:0</div>
+                    <div id="pongMessages" class="game-messages" style="min-height: 50px;"></div>
+                    <canvas id="pongGameCanvas" class="game-canvas" style="background-color: #000000;"></canvas>
+                    <p class="controls-text">P1:W/S|P2:Up/Down</p>`;
+                
+                this.canvas = this.parentElement.querySelector('#pongGameCanvas');
+                this.scoreDisplayElement = this.parentElement.querySelector('#pongScoreDisplay');
+                this.messagesContainer = this.parentElement.querySelector('#pongMessages');
+
+                if (!this.canvas) {
+                    console.error("PongGame: Failed to find canvas element after DOM setup!");
+                    return;
+                }
+
+                const containerWidth = this.parentElement.offsetWidth > 0 ? this.parentElement.offsetWidth : 600;
+                this.canvas.width = Math.min(containerWidth - 40, 560);
+                this.canvas.height = this.canvas.width * 0.6;
+                this.ctx = this.canvas.getContext('2d');
+
+                if (!this.ctx) {
+                    console.error("PongGame: Failed to get 2D context for Pong canvas!");
+                }
+            }
+
+            init() {
+                console.log("PongGame: Initializing game...");
+                this.score1 = 0;
+                this.score2 = 0;
+                this._updateScoreDisplay();
+                if (this.messagesContainer) this.messagesContainer.innerHTML = '';
+
+                if (!this.canvas || !this.ctx) {
+                    console.error("PongGame: Canvas or context not available for init!");
+                    return;
+                }
+
+                this.paddle1 = { x: 10, y: this.canvas.height / 2 - this.PADDLE_HEIGHT / 2, width: this.PADDLE_WIDTH, height: this.PADDLE_HEIGHT };
+                this.paddle2 = { x: this.canvas.width - this.PADDLE_WIDTH - 10, y: this.canvas.height / 2 - this.PADDLE_HEIGHT / 2, width: this.PADDLE_WIDTH, height: this.PADDLE_HEIGHT };
+                this._resetBall();
+
+                if (this.gameLoopInterval) clearInterval(this.gameLoopInterval);
+                this.gameLoopInterval = setInterval(() => this._update(), 1000 / 60);
+                console.log("PongGame: Initialized and game loop started.");
+            }
+
+            _resetBall() {
+                if (!this.canvas) return;
+                this.ball = { 
+                    x: this.canvas.width / 2, 
+                    y: this.canvas.height / 2, 
+                    radius: this.BALL_RADIUS, 
+                    dx: (Math.random() > 0.5 ? 3.5 : -3.5), 
+                    dy: (Math.random() - 0.5) * 5 
+                };
+                if (Math.abs(this.ball.dy) < 0.5) this.ball.dy = Math.random() > 0.5 ? 1 : -1;
+            }
+
+            _updateScoreDisplay() {
+                if (this.scoreDisplayElement) {
+                    this.scoreDisplayElement.textContent = `P1: ${this.score1} - P2: ${this.score2}`;
+                }
+            }
+
+            _playPaddleHitSound() { if (this.synths.paddleHit && Tone.context.state === 'running') this.synths.paddleHit.triggerAttackRelease("C4", "0.05"); }
+            _playScoreSound() { if (this.synths.score && Tone.context.state === 'running') { this.synths.score.triggerAttackRelease("A5", "0.15", Tone.now()); this.synths.score.triggerAttackRelease("E5", "0.1", Tone.now() + 0.07); }}
+            _playWallHitSound() { if (this.synths.wallHit && Tone.context.state === 'running') this.synths.wallHit.triggerAttackRelease("G2", "0.02");}
+
+            _handleInput() {
+                if (!this.paddle1 || !this.paddle2 || !this.canvas) return;
+                if (this.gameKeys['w'] || this.gameKeys['W']) this.paddle1.y -= this.PADDLE_SPEED;
+                if (this.gameKeys['s'] || this.gameKeys['S']) this.paddle1.y += this.PADDLE_SPEED;
+                if (this.gameKeys['ArrowUp']) this.paddle2.y -= this.PADDLE_SPEED;
+                if (this.gameKeys['ArrowDown']) this.paddle2.y += this.PADDLE_SPEED;
+
+                this.paddle1.y = Math.max(0, Math.min(this.canvas.height - this.paddle1.height, this.paddle1.y));
+                this.paddle2.y = Math.max(0, Math.min(this.canvas.height - this.paddle2.height, this.paddle2.y));
+            }
+
+            _update() {
+                if (!this.ball || !this.paddle1 || !this.paddle2 || !this.canvas || !this.ctx) {
+                     return; 
+                }
+
+                this._handleInput();
+
+                this.ball.x += this.ball.dx;
+                this.ball.y += this.ball.dy;
+
+                if (this.ball.y + this.ball.radius > this.canvas.height || this.ball.y - this.ball.radius < 0) {
+                    this.ball.dy *= -1;
+                    this._playWallHitSound();
+                }
+
+                if (this.ball.dx < 0 && 
+                    this.ball.x - this.ball.radius < this.paddle1.x + this.paddle1.width &&
+                    this.ball.x - this.ball.radius > this.paddle1.x &&
+                    this.ball.y + this.ball.radius > this.paddle1.y &&
+                    this.ball.y - this.ball.radius < this.paddle1.y + this.paddle1.height) {
+                    this.ball.dx *= -1;
+                    let dY = this.ball.y - (this.paddle1.y + this.paddle1.height / 2);
+                    this.ball.dy = dY * 0.25;
+                    this._playPaddleHitSound();
+                    this.ball.x = this.paddle1.x + this.paddle1.width + this.ball.radius; 
+                }
+
+                if (this.ball.dx > 0 && 
+                    this.ball.x + this.ball.radius > this.paddle2.x &&
+                    this.ball.x + this.ball.radius < this.paddle2.x + this.paddle2.width &&
+                    this.ball.y + this.ball.radius > this.paddle2.y &&
+                    this.ball.y - this.ball.radius < this.paddle2.y + this.paddle2.height) {
+                    this.ball.dx *= -1;
+                    let dY = this.ball.y - (this.paddle2.y + this.paddle2.height / 2);
+                    this.ball.dy = dY * 0.25;
+                    this._playPaddleHitSound();
+                    this.ball.x = this.paddle2.x - this.ball.radius; 
+                }
+
+                if (this.ball.x + this.ball.radius < 0) { 
+                    this.score2++; this._updateScoreDisplay(); this._resetBall(); this._playScoreSound();
+                } else if (this.ball.x - this.ball.radius > this.canvas.width) { 
+                    this.score1++; this._updateScoreDisplay(); this._resetBall(); this._playScoreSound();
+                }
+
+                if (this.score1 >= this.WIN_SCORE || this.score2 >= this.WIN_SCORE) {
+                    this._endGame(); return; 
+                }
+                this._draw();
+            }
+
+            _draw() {
+                if (!this.ctx || !this.canvas) return;
+                this.ctx.fillStyle = '#000'; this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.fillStyle = '#fff';
+                if (this.paddle1) this.ctx.fillRect(this.paddle1.x, this.paddle1.y, this.paddle1.width, this.paddle1.height);
+                if (this.paddle2) this.ctx.fillRect(this.paddle2.x, this.paddle2.y, this.paddle2.width, this.paddle2.height);
+                if (this.ball) { this.ctx.beginPath(); this.ctx.arc(this.ball.x, this.ball.y, this.ball.radius, 0, Math.PI * 2); this.ctx.fill(); }
+                this.ctx.strokeStyle = '#555'; this.ctx.lineWidth = 2; this.ctx.beginPath(); this.ctx.moveTo(this.canvas.width / 2, 0); this.ctx.lineTo(this.canvas.width / 2, this.canvas.height); this.ctx.stroke();
+            }
+
+            _endGame() {
+                if (this.gameLoopInterval) clearInterval(this.gameLoopInterval);
+                this.gameLoopInterval = null;
+                const winner = this.score1 > this.score2 ? "Player 1" : "Player 2";
+                if (this.messagesContainer) {
+                    this.messagesContainer.innerHTML = `<h3 class="text-2xl mt-4">${winner} Wins! Final: ${this.score1}-${this.score2}</h3>`;
+                    const playAgainButton = document.createElement('button');
+                    playAgainButton.textContent = 'Play Pong Again'; playAgainButton.className = 'menu-button'; playAgainButton.style.backgroundColor = '#2ecc71';
+                    playAgainButton.onclick = () => this.init(); 
+                    this.messagesContainer.appendChild(playAgainButton);
+                }
+                console.log("PongGame: Game ended.");
+            }
+
+            destroy() {
+                console.log("PongGame: Destroying instance...");
+                if (this.gameLoopInterval) { clearInterval(this.gameLoopInterval); this.gameLoopInterval = null; }
+                if (this.parentElement) { this.parentElement.innerHTML = ''; }
+                console.log("PongGame: Instance destroyed.");
+            }
         }
+
+
+        // The following sound functions for Pong are now handled by the PongGame class.
+        // function playPongPaddleHitSound() { if (synths.pong.paddleHit && Tone.context.state === 'running') synths.pong.paddleHit.triggerAttackRelease("C4", "0.05"); }
+        // function playPongScoreSound() { if (synths.pong.score && Tone.context.state === 'running') { synths.pong.score.triggerAttackRelease("A5", "0.15", Tone.now()); synths.pong.score.triggerAttackRelease("E5", "0.1", Tone.now() + 0.07); }}
+        // function playPongWallHitSound() { if (synths.pong.wallHit && Tone.context.state === 'running') synths.pong.wallHit.triggerAttackRelease("G2", "0.02");}
 
         // --- FOOSBALL GAME SOUNDS & LOGIC ---
         function playFoosballManHitSound() { if (synths.foosball.manHit && Tone.context.state === 'running') synths.foosball.manHit.triggerAttackRelease(0.02); }
@@ -380,15 +503,9 @@
         let foosballCanvas, foosballCtx, foosballBall, foosballPaddlesP1 = [], foosballPaddlesP2 = [], foosballScore1 = 0, foosballScore2 = 0;
         const FOOSBALL_PADDLE_HEIGHT = 50, FOOSBALL_PADDLE_WIDTH = 10, FOOSBALL_PADDLE_SPEED = 5, FOOSBALL_BALL_RADIUS = 6, FOOSBALL_GOAL_HEIGHT_PERCENT = 0.35, FOOSBALL_WIN_SCORE = 7;
         function loadFoosball() {
-            console.log("loadFoosball called");
-            const gameContainer = document.getElementById('foosball-game'); 
-            if (!gameContainer) { console.error("Foosball container 'foosball-game' not found!"); return; }
-            gameContainer.innerHTML = `
-                <div class="score-display" id="foosballScore">P1: 0 - P2: 0</div>
-                <div id="foosballMessages" class="game-messages"></div>
-                <canvas id="foosballCanvas" class="game-canvas"></canvas>
-                <p class="controls-text">P1 (Red): W/S | P2 (Blue): ArrowUp/ArrowDown</p>`;
-            const C = gameContainer; // For consistency with existing code if needed
+            const C = document.getElementById('foosball-game');  // This is the gameContent div
+            if (!C) { console.error("Foosball container 'foosball-game' not found!"); return; }
+            C.innerHTML = `<div class="score-display" id="foosballScore">P1: 0 - P2: 0</div><canvas id="foosballCanvas" class="game-canvas"></canvas><p class="controls-text">P1 (Red): W/S | P2 (Blue): ArrowUp/ArrowDown</p>`;
             foosballCanvas = document.getElementById('foosballCanvas'); 
             if (!foosballCanvas) { console.error("Foosball canvas 'foosballCanvas' not found!"); return; }
             const cW = C.offsetWidth > 0 ? C.offsetWidth : 600;
@@ -398,10 +515,7 @@
             initFoosballGame();
         }
         function initFoosballGame(){
-            console.log("initFoosballGame called");
             foosballScore1 = 0; foosballScore2 = 0; updateFoosballScoreDisplay();
-            const messagesContainer = document.getElementById('foosballMessages');
-            if (messagesContainer) messagesContainer.innerHTML = '';
             if (!foosballCanvas) { console.error("initFoosballGame: foosballCanvas is not defined!"); return; }
             foosballPaddlesP1 = []; foosballPaddlesP2 = [];
             const p1_g_x = foosballCanvas.width*0.1, p1_a_x = foosballCanvas.width*0.3, p1_a_s = foosballCanvas.height/4;
@@ -415,7 +529,6 @@
             foosballPaddlesP2.push({ x: p2_a_x, y: 2 * p2_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
             foosballPaddlesP2.push({ x: p2_a_x, y: 3 * p2_a_s - FOOSBALL_PADDLE_HEIGHT / 2, width: FOOSBALL_PADDLE_WIDTH, height: FOOSBALL_PADDLE_HEIGHT });
             resetFoosballBall(); if (activeGameInterval) clearInterval(activeGameInterval); activeGameInterval = setInterval(updateFoosball, 1000 / 60);
-            console.log("Foosball initialized and interval set.");
         }
         function resetFoosballBall(){ 
             if (!foosballCanvas) { console.error("resetFoosballBall: foosballCanvas is not defined!"); return; }
@@ -458,45 +571,12 @@
                 }
             });
             const gH=foosballCanvas.height*FOOSBALL_GOAL_HEIGHT_PERCENT, gY=(foosballCanvas.height-gH)/2;
-            if (foosballBall.x + foosballBall.radius < 0) {
-                if (foosballBall.y > gY && foosballBall.y < gY + gH) {
-                    foosballScore2++;
-                    updateFoosballScoreDisplay();
-                    resetFoosballBall();
-                    playFoosballScoreSound();
-                } else {
-                    foosballBall.dx *= -1;
-                    foosballBall.x = foosballBall.radius;
-                    playFoosballTableWallHitSound();
-                }
-            } else if (foosballBall.x - foosballBall.radius > foosballCanvas.width) {
-                if (foosballBall.y > gY && foosballBall.y < gY + gH) {
-                    foosballScore1++;
-                    updateFoosballScoreDisplay();
-                    resetFoosballBall();
-                    playFoosballScoreSound();
-                } else {
-                    foosballBall.dx *= -1;
-                    foosballBall.x = foosballCanvas.width - foosballBall.radius;
-                    playFoosballTableWallHitSound();
-                }
-            }
-
-            if (foosballScore1 >= FOOSBALL_WIN_SCORE || foosballScore2 >= FOOSBALL_WIN_SCORE) { 
-                clearInterval(activeGameInterval); 
-                activeGameInterval = null; 
-                const winner = foosballScore1 > foosballScore2 ? "P1 (Red)" : "P2 (Blue)";
-                const messagesContainer = document.getElementById('foosballMessages');
-                if (messagesContainer) {
-                    messagesContainer.innerHTML = `<h3 class="text-2xl mt-4">${winner} Wins! Final: ${foosballScore1}-${foosballScore2}</h3>`;
-                    const playAgainButton = document.createElement('button');
-                    playAgainButton.textContent = 'Play Foosball Again';
-                    playAgainButton.className = 'menu-button';
-                    playAgainButton.style.backgroundColor = '#2ecc71';
-                    playAgainButton.onclick = initFoosballGame;
-                    messagesContainer.appendChild(playAgainButton);
-                }
-                return;
+            if(foosballBall.x+foosballBall.radius<0){ if(foosballBall.y>gY&&foosballBall.y<gY+gH){ foosballScore2++; updateFoosballScoreDisplay(); resetFoosballBall(); playFoosballScoreSound(); } else { foosballBall.dx*=-1;foosballBall.x=foosballBall.radius; playFoosballTableWallHitSound(); }}
+            else if(foosballBall.x-foosballBall.radius>foosballCanvas.width){ if(foosballBall.y>gY&&foosballBall.y<gY+gH){ foosballScore1++; updateFoosballScoreDisplay(); resetFoosballBall(); playFoosballScoreSound(); } else { foosballBall.dx*=-1;foosballBall.x=foosballCanvas.width-foosballBall.radius; playFoosballTableWallHitSound(); }}
+            if(foosballScore1>=FOOSBALL_WIN_SCORE||foosballScore2>=FOOSBALL_WIN_SCORE){ 
+                clearInterval(activeGameInterval); activeGameInterval=null; const W=foosballScore1>foosballScore2?"P1 (Red)":"P2 (Blue)"; const C=document.getElementById('foosball-game');
+                const M=document.createElement('div');M.innerHTML=`<h3 class="text-2xl mt-4">${W} Wins! Final: ${foosballScore1}-${foosballScore2}</h3>`;if(C)C.insertBefore(M,C.firstChild);
+                const B=document.createElement('button');B.textContent='Play Foosball Again';B.className='menu-button';B.style.backgroundColor='#2ecc71';B.onclick=()=>{if(C && M.parentNode === C)C.removeChild(M); if(C && B.parentNode === C)C.removeChild(B);initFoosballGame();};if(C)C.appendChild(B);return;
             }
             drawFoosball();
         }
@@ -512,13 +592,8 @@
         function loadIceHockey() { 
             console.log("loadIceHockey called");
             const C = document.getElementById('ice-hockey-game'); 
-            if (!C) { console.error("Ice Hockey container 'ice-hockey-game' not found!"); return; } // C is gameContainer
-            C.innerHTML = `
-                <div class="score-display" id="iceHockeyScore">P1:0-P2:0</div>
-                <div id="iceHockeyMessages" class="game-messages"></div>
-                <canvas id="iceHockeyCanvas" class="game-canvas"></canvas>
-                <p class="controls-text">P1:W/S|P2:Up/Down</p>`;
-
+            if (!C) { console.error("Ice Hockey container 'ice-hockey-game' not found!"); return; }
+            C.innerHTML = `<div class="score-display" id="iceHockeyScore">P1:0-P2:0</div><canvas id="iceHockeyCanvas" class="game-canvas"></canvas><p class="controls-text">P1:W/S|P2:Up/Down</p>`;
             iceHockeyCanvas = document.getElementById('iceHockeyCanvas'); 
             if (!iceHockeyCanvas) { console.error("Ice Hockey canvas 'iceHockeyCanvas' not found!"); return; }
             const cW = C.offsetWidth > 0 ? C.offsetWidth : 600; iceHockeyCanvas.width = Math.min(cW - 40, 560); iceHockeyCanvas.height = iceHockeyCanvas.width * 0.65; 
@@ -529,8 +604,6 @@
         function initIceHockeyGame() { 
             console.log("initIceHockeyGame called");
             iceHockeyScore1 = 0; iceHockeyScore2 = 0; updateIceHockeyScoreDisplay(); 
-            const messagesContainer = document.getElementById('iceHockeyMessages');
-            if (messagesContainer) messagesContainer.innerHTML = '';
             if (!iceHockeyCanvas) { console.error("initIceHockeyGame: iceHockeyCanvas is not defined!"); return; }
             stickP1 = { x: 20, y: iceHockeyCanvas.height / 2 - STICK_HEIGHT / 2, width: STICK_WIDTH, height: STICK_HEIGHT, color: '#D10000' }; 
             stickP2 = { x: iceHockeyCanvas.width - STICK_WIDTH - 20, y: iceHockeyCanvas.height / 2 - STICK_HEIGHT / 2, width: STICK_WIDTH, height: STICK_HEIGHT, color: '#001F95' }; 
@@ -579,46 +652,12 @@
             if (puck.dx < 0 && puck.x - puck.radius < stickP1.x + stickP1.width && puck.x - puck.radius > stickP1.x && puck.y + puck.radius > stickP1.y && puck.y - puck.radius < stickP1.y + stickP1.height) { puck.dx *= -1.02; let dY = puck.y - (stickP1.y + stickP1.height / 2); puck.dy = dY * 0.28; puck.x = stickP1.x + stickP1.width + puck.radius; playHockeyStickHitSound(); }
             if (puck.dx > 0 && puck.x + puck.radius > stickP2.x && puck.x + puck.radius < stickP2.x + stickP2.width && puck.y + puck.radius > stickP2.y && puck.y - puck.radius < stickP2.y + stickP2.height) { puck.dx *= -1.02; let dY = puck.y - (stickP2.y + stickP2.height / 2); puck.dy = dY * 0.28; puck.x = stickP2.x - puck.radius; playHockeyStickHitSound(); }
             const gH = iceHockeyCanvas.height*ICE_HOCKEY_GOAL_HEIGHT_PERCENT, gY=(iceHockeyCanvas.height-gH)/2, gL1=5, gL2=iceHockeyCanvas.width-5;
-            
-            if (puck.x - puck.radius < gL1) {
-                if (puck.y > gY && puck.y < gY + gH) {
-                    iceHockeyScore2++; 
-                    updateIceHockeyScoreDisplay(); 
-                    resetIceHockeyPuck(); 
-                    playHockeyScoreSound();
-                } else {
-                    puck.dx *= -1; 
-                    puck.x = gL1 + puck.radius; 
-                    playHockeyBoardHitSound();
-                }
-            } else if (puck.x + puck.radius > gL2) {
-                if (puck.y > gY && puck.y < gY + gH) {
-                    iceHockeyScore1++; 
-                    updateIceHockeyScoreDisplay(); 
-                    resetIceHockeyPuck(); 
-                    playHockeyScoreSound();
-                } else {
-                    puck.dx *= -1; 
-                    puck.x = gL2 - puck.radius; 
-                    playHockeyBoardHitSound();
-                }
-            }
-
+            if (puck.x - puck.radius < gL1) { if (puck.y > gY && puck.y < gY + gH) { iceHockeyScore2++; updateIceHockeyScoreDisplay(); resetIceHockeyPuck(); playHockeyScoreSound(); } else { puck.dx *= -1; puck.x = gL1 + puck.radius; playHockeyBoardHitSound(); }}
+            else if (puck.x + puck.radius > gL2) { if (puck.y > gY && puck.y < gY + gH) { iceHockeyScore1++; updateIceHockeyScoreDisplay(); resetIceHockeyPuck(); playHockeyScoreSound(); } else { puck.dx *= -1; puck.x = gL2 - puck.radius; playHockeyBoardHitSound(); }}
             if (iceHockeyScore1 >= ICE_HOCKEY_WIN_SCORE || iceHockeyScore2 >= ICE_HOCKEY_WIN_SCORE) { 
-                clearInterval(activeGameInterval); 
-                activeGameInterval = null; 
-                const winner = iceHockeyScore1 > iceHockeyScore2 ? "P1 (Red)" : "P2 (Blue)";
-                const messagesContainer = document.getElementById('iceHockeyMessages');
-                if (messagesContainer) {
-                    messagesContainer.innerHTML = `<h3 class="text-2xl mt-4">${winner} Wins! Final: ${iceHockeyScore1}-${iceHockeyScore2}</h3>`;
-                    const playAgainButton = document.createElement('button');
-                    playAgainButton.textContent = 'Play Hockey Again';
-                    playAgainButton.className = 'menu-button';
-                    playAgainButton.style.backgroundColor = '#2ecc71';
-                    playAgainButton.onclick = initIceHockeyGame;
-                    messagesContainer.appendChild(playAgainButton);
-                }
-                return; 
+                clearInterval(activeGameInterval); activeGameInterval=null; const W=iceHockeyScore1>iceHockeyScore2?"P1 (Red)":"P2 (Blue)"; const C=document.getElementById('ice-hockey-game'); 
+                const M=document.createElement('div');M.innerHTML=`<h3 class="text-2xl mt-4">${W} Wins! Final: ${iceHockeyScore1}-${iceHockeyScore2}</h3>`;if(C)C.insertBefore(M,C.firstChild); 
+                const B=document.createElement('button');B.textContent='Play Hockey Again';B.className='menu-button';B.style.backgroundColor='#2ecc71';B.onclick=()=>{if(C && M.parentNode === C)C.removeChild(M); if(C && B.parentNode === C)C.removeChild(B);initIceHockeyGame();};if(C)C.appendChild(B);return; 
             }
             drawIceHockey();
         }
@@ -637,14 +676,9 @@
         
         function loadAssholePong() { 
             console.log("loadAssholePong called");
-            const gameContainer = document.getElementById('asshole-pong-game'); 
-            if (!gameContainer) { console.error("Asshole Pong container 'asshole-pong-game' not found!"); return; }
-            gameContainer.innerHTML = `
-                <div class="score-display" id="assholePongScore">P1:0-P2:0</div>
-                <div id="assholePongMessages" class="game-messages"></div>
-                <canvas id="assholePongCanvas" class="game-canvas"></canvas>
-                <p class="controls-text">P1 (Glitchy):W/S | P2 (OP):Up/Down</p>`;
-            const C = gameContainer; // For consistency
+            const C = document.getElementById('asshole-pong-game'); 
+            if (!C) { console.error("Asshole Pong container 'asshole-pong-game' not found!"); return; }
+            C.innerHTML = `<div class="score-display" id="assholePongScore">P1:0-P2:0</div><canvas id="assholePongCanvas" class="game-canvas"></canvas><p class="controls-text">P1 (Glitchy):W/S | P2 (OP):Up/Down</p>`; // Removed sound not implemented message
             assholePongCanvas = document.getElementById('assholePongCanvas'); 
             if (!assholePongCanvas) { console.error("Asshole Pong canvas 'assholePongCanvas' not found!"); return; }
             const cW = C.offsetWidth > 0 ? C.offsetWidth : 600; assholePongCanvas.width = Math.min(cW - 40, 560); assholePongCanvas.height = assholePongCanvas.width * 0.6; 
@@ -655,8 +689,6 @@
         function initAssholePongGame(){ 
             console.log("initAssholePongGame called");
             apScore1=0; apScore2=0; updateAssholePongScoreDisplay(); p1GlitchTimer=0; p1GlitchType=null; 
-            const messagesContainer = document.getElementById('assholePongMessages');
-            if (messagesContainer) messagesContainer.innerHTML = '';
             if (!assholePongCanvas) { console.error("initAssholePongGame: assholePongCanvas is not defined!"); return; }
             apPaddle1 = { x:10, y:assholePongCanvas.height/2-AP_PADDLE1_HEIGHT/2, width:AP_PADDLE_WIDTH, height:AP_PADDLE1_HEIGHT, color:'#fde047'}; 
             const p2H = assholePongCanvas.height*AP_PADDLE2_HEIGHT_FACTOR; 
@@ -673,7 +705,7 @@
         
         function drawAssholePong(){
             if(!assholePongCtx || !assholePongCanvas) return;
-            assholePongCtx.clearRect(0,0, assholePongCanvas.width, assholePongCanvas.height); // THIS LINE WAS UNCOMMENTED
+            assholePongCtx.clearRect(0,0, assholePongCanvas.width, assholePongCanvas.height); 
             
             if(apPaddle1) { assholePongCtx.fillStyle=apPaddle1.color; assholePongCtx.fillRect(apPaddle1.x,apPaddle1.y,apPaddle1.width,apPaddle1.height); }
             if(apPaddle2) { assholePongCtx.fillStyle=apPaddle2.color; assholePongCtx.fillRect(apPaddle2.x,apPaddle2.y,apPaddle2.width,apPaddle2.height); }
@@ -711,26 +743,10 @@
             if(apBall.dx>0&&apBall.x+apBall.radius>apPaddle2.x&&apBall.x+apBall.radius<apPaddle2.x+apPaddle2.width&&apBall.y+apBall.radius>apPaddle2.y&&apBall.y-apBall.radius<apPaddle2.y+apPaddle2.height){ apBall.dx*=-1;let dY=apBall.y-(apPaddle2.y+apPaddle2.height/2);apBall.dy=dY*0.25;apBall.x=apPaddle2.x-apBall.radius; playAPPaddle2HitSound(); }
             if(apBall.x+apBall.radius<0){ apScore2++;updateAssholePongScoreDisplay();resetAssholePongBall(); playAPScoreSound(); } 
             else if(apBall.x-apBall.radius>assholePongCanvas.width){ apScore1++;updateAssholePongScoreDisplay();resetAssholePongBall(); playAPScoreSound(); }
-            
-            if (apScore1 >= AP_WIN_SCORE || apScore2 >= AP_WIN_SCORE) { 
-                clearInterval(activeGameInterval);
-                activeGameInterval = null;
-                const winner = apScore1 > apScore2 ? "P1 (somehow?!)" : "P2 (obviously)";
-                const messagesContainer = document.getElementById('assholePongMessages');
-                if (messagesContainer) {
-                    messagesContainer.innerHTML = `
-                        <h3 class="text-2xl mt-4">${winner} Wins!</h3>
-                        <p>Final Score: P1:${apScore1}-P2:${apScore2}</p>`;
-                    
-                    const playAgainButton = document.createElement('button');
-                    playAgainButton.textContent = 'Play Asshole Pong Again';
-                    playAgainButton.className = 'menu-button';
-                    playAgainButton.style.backgroundColor = '#fde047';
-                    playAgainButton.style.color = '#581c87';
-                    playAgainButton.onclick = initAssholePongGame;
-                    messagesContainer.appendChild(playAgainButton);
-                }
-                return; 
+            if(apScore1>=AP_WIN_SCORE||apScore2>=AP_WIN_SCORE){ 
+                clearInterval(activeGameInterval);activeGameInterval=null;const W=apScore1>apScore2?"P1 (somehow?!)":"P2 (obviously)";const C=document.getElementById('asshole-pong-game'); 
+                const M=document.createElement('div');M.innerHTML=`<h3 class="text-2xl mt-4">${W} Wins!</h3><p>Final Score: P1:${apScore1}-P2:${apScore2}</p>`;if(C)C.insertBefore(M,C.firstChild); 
+                const B=document.createElement('button');B.textContent='Play Asshole Pong Again';B.className='menu-button';B.style.backgroundColor='#fde047';B.style.color='#581c87';B.onclick=()=>{if(C && M.parentNode === C)C.removeChild(M); if(C && B.parentNode === C)C.removeChild(B);initAssholePongGame();};if(C)C.appendChild(B);return; 
             }
             drawAssholePong();
         }
